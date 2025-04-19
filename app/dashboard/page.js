@@ -1,6 +1,7 @@
+// app/dashboard/page.jsx
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import {
@@ -11,51 +12,16 @@ import {
   FiClipboard,
 } from "react-icons/fi";
 
-// 1️⃣ Core Chart.js registries
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  TimeScale,
-  Tooltip,
-  Legend,
-} from "chart.js";
-// 2️⃣ Financial plugin
-import {
-  CandlestickController,
-  CandlestickElement,
-} from "chartjs-chart-financial";
-// 3️⃣ React wrapper
-import { Chart } from "react-chartjs-2";
-// 4️⃣ Date adapter
-import "chartjs-adapter-date-fns";
-
-// 5️⃣ Register what we need
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  TimeScale,
-  Tooltip,
-  Legend,
-  CandlestickController,
-  CandlestickElement
-);
-
 export default function DashboardPage() {
   const router = useRouter();
+  const [isClient, setIsClient] = useState(false);
   const [user, setUser] = useState(null);
   const [botSettings, setBotSettings] = useState(null);
+  const [positions, setPositions] = useState([]);
   const [collapsed, setCollapsed] = useState(false);
-  const [isClient, setIsClient] = useState(false);
+  const [controlStatus, setControlStatus] = useState("");
 
-  // 🔥 Candlestick
-  const [symbol, setSymbol] = useState("DOGE/USDT");
-  const [candles, setCandles] = useState([]);
-
-  // 📝 Live open orders
-  const [openOrders, setOpenOrders] = useState([]);
-
-  // ⚙️ Signal form
+  // Signal config state...
   const [activation, setActivation] = useState("active");
   const [webhookType, setWebhookType] = useState("public");
   const [preferredSide, setPreferredSide] = useState("longShort");
@@ -65,33 +31,31 @@ export default function DashboardPage() {
   const [stopLoss, setStopLoss] = useState("0");
   const [takeProfit, setTakeProfit] = useState("0.5");
   const [leverage, setLeverage] = useState("1");
-  const [controlStatus, setControlStatus] = useState("");
 
-  // ─── Auth ──────────────────────────────────────────────────────────────────────
+  // 1) Auth & user
   useEffect(() => {
     setIsClient(true);
-    if (typeof window === "undefined") return;
-    const t = localStorage.getItem("token");
-    if (!t) return router.push("/login");
+    const token = localStorage.getItem("token");
+    if (!token) return router.push("/login");
     try {
-      setUser(JSON.parse(atob(t.split(".")[1])));
+      setUser(JSON.parse(atob(token.split(".")[1])));
     } catch {
       router.push("/login");
     }
   }, [router]);
 
-  // ─── Load settings & open orders ────────────────────────────────────────────────
+  // 2) Fetch settings & positions once
   useEffect(() => {
-    if (!isClient) return;
+    if (!isClient || !user) return;
     const token = localStorage.getItem("token");
 
-    // 1) Bot settings
+    // a) Bot settings
     axios
       .get("/api/bot-settings", {
         headers: { Authorization: `Bearer ${token}` },
       })
-      .then((r) => {
-        const d = r.data || {};
+      .then((res) => {
+        const d = res.data;
         setBotSettings(d);
         setActivation(d.activation ?? "active");
         setWebhookType(d.webhookType ?? "public");
@@ -104,76 +68,50 @@ export default function DashboardPage() {
         setTpSlEnabled(d.tpSlEnabled ?? false);
       })
       .catch(console.error);
-  }, [isClient]);
 
-  //live
-  useEffect(() => {
-    if (!isClient) return;
-    const token = localStorage.getItem("token");
+    // b) Live positions
     axios
-      .get("/api/orders/live", {
+      .get("/api/positions/live", {
         headers: { Authorization: `Bearer ${token}` },
       })
-      .then((res) => setOpenOrders(res.data))
-      .catch(console.error);
-  }, [isClient]);
+      .then((res) => setPositions(res.data))
+      .catch((err) => console.error("Error fetching positions:", err));
+  }, [isClient, user]);
 
-  // ─── Fetch OHLC candles ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!isClient) return;
-    const sym = symbol.replace("/", "");
-    axios
-      .get("https://api.binance.com/api/v3/klines", {
-        params: { symbol: sym, interval: "5m", limit: 50 },
-      })
-      .then((r) =>
-        setCandles(
-          r.data.map((c) => ({
-            x: c[0],
-            o: +c[1],
-            h: +c[2],
-            l: +c[3],
-            c: +c[4],
-          }))
-        )
-      )
-      .catch(console.error);
-  }, [isClient, symbol]);
-
-  // ─── Handlers ────────────────────────────────────────────────────────────────
+  // Handlers...
   const handleLogout = () => {
     localStorage.removeItem("token");
     router.push("/login");
   };
   const handleControlSubmit = async (e) => {
     e.preventDefault();
-    const token = localStorage.getItem("token");
     if (!botSettings) return;
+    const token = localStorage.getItem("token");
+    const payload = {
+      ...botSettings,
+      activation,
+      webhookType,
+      preferredSide,
+      longSize: +longSize,
+      shortSize: +shortSize,
+      stopLoss: +stopLoss,
+      takeProfit: +takeProfit,
+      leverage: +leverage,
+      tpSlEnabled,
+    };
     try {
-      await axios.post(
-        "/api/bot-settings",
-        {
-          ...botSettings,
-          activation,
-          webhookType,
-          preferredSide,
-          longSize: +longSize,
-          shortSize: +shortSize,
-          stopLoss: +stopLoss,
-          takeProfit: +takeProfit,
-          leverage: +leverage,
-          tpSlEnabled,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await axios.post("/api/bot-settings", payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setControlStatus("Configuration saved!");
     } catch {
       setControlStatus("Error saving configuration.");
     }
   };
 
-  if (!isClient || !user)
+  if (!isClient || !user) {
     return <p className="text-center mt-10 text-gray-300">Loading…</p>;
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -189,32 +127,36 @@ export default function DashboardPage() {
             <FiMenu size={20} />
           </button>
         </div>
-        <div className="space-y-4">
+        <nav className="space-y-4">
           <button
             onClick={() => router.push("/profile")}
             className="flex items-center gap-2 hover:text-blue-400"
           >
-            <FiUser /> {!collapsed && "Profile"}
+            <FiUser />
+            {!collapsed && "Profile"}
           </button>
           <button
             onClick={() => router.push("/bot-settings")}
             className="flex items-center gap-2 hover:text-blue-400"
           >
-            <FiSettings /> {!collapsed && "Settings"}
+            <FiSettings />
+            {!collapsed && "Settings"}
           </button>
           <button
             onClick={() => router.push("/logs")}
             className="flex items-center gap-2 hover:text-yellow-400"
           >
-            <FiClipboard /> {!collapsed && "Logs"}
+            <FiClipboard />
+            {!collapsed && "Logs"}
           </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-2 hover:text-red-400"
           >
-            <FiLogOut /> {!collapsed && "Logout"}
+            <FiLogOut />
+            {!collapsed && "Logout"}
           </button>
-        </div>
+        </nav>
       </aside>
 
       {/* Main */}
@@ -232,67 +174,31 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* OHLC Candlestick */}
-        <div className="bg-gray-700 p-4 rounded mb-6">
-          <div className="flex items-center mb-3">
-            <h3 className="text-xl flex-1">50×5m Candles</h3>
-            <select
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              className="bg-gray-600 text-white p-1 rounded"
-            >
-              {["DOGE/USDT", "BTC/USDT", "ETH/USDT", "XRP/USDT"].map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="h-64">
-            <Chart
-              type="candlestick"
-              data={{ datasets: [{ label: symbol, data: candles }] }}
-              options={{
-                scales: {
-                  x: { type: "time", time: { unit: "minute" } },
-                  y: { beginAtZero: false },
-                },
-                plugins: { legend: { display: false } },
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Live Open Orders */}
-        <div className="bg-gray-700 p-4 rounded mb-6">
-          <h3 className="text-xl mb-2">Your Open Orders</h3>
-          {openOrders.length === 0 ? (
-            <p className="text-gray-400">No open orders.</p>
+        {/* Open Positions */}
+        <section className="bg-gray-700 p-4 rounded mb-6">
+          <h3 className="text-xl mb-2">Your Open Positions</h3>
+          {positions.length === 0 ? (
+            <p className="text-gray-400">No open positions.</p>
           ) : (
-            <div className="space-y-2 text-sm">
-              {openOrders.map((o) => (
-                <div
-                  key={o.id}
-                  className="grid grid-cols-5 gap-2 bg-gray-600 p-2 rounded"
-                >
-                  <div>{o.symbol}</div>
-                  <div>{o.side.toUpperCase()}</div>
-                  <div>{o.amount}</div>
-                  <div>{o.price ?? "MKT"}</div>
-                  <div>
-                    {new Date(o.timestamp).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </div>
-                </div>
+            <div className="grid grid-cols-4 gap-2 text-sm">
+              <div className="font-bold">Symbol</div>
+              <div className="font-bold">Side</div>
+              <div className="font-bold">Contracts</div>
+              <div className="font-bold">Entry Price</div>
+              {positions.map((p, i) => (
+                <React.Fragment key={i}>
+                  <div>{p.symbol}</div>
+                  <div className="capitalize">{p.side}</div>
+                  <div>{p.contracts}</div>
+                  <div>{p.entryPrice}</div>
+                </React.Fragment>
               ))}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Signal Configuration */}
-        <div className="bg-gray-700 p-4 rounded">
+        {/* Signal Configuration Form (unchanged) */}
+        <section className="bg-gray-700 p-4 rounded">
           <h3 className="text-xl mb-4">Signal Configuration</h3>
           {controlStatus && (
             <p className="mb-4 text-green-400">{controlStatus}</p>
@@ -313,7 +219,6 @@ export default function DashboardPage() {
                 <option value="inactive">Inactive</option>
               </select>
             </div>
-
             {/* Webhook Mode */}
             <div>
               <label className="block mb-1">Webhook Mode</label>
@@ -326,7 +231,6 @@ export default function DashboardPage() {
                 <option value="individual">Individual</option>
               </select>
             </div>
-
             {/* Preferred Side */}
             <div>
               <label className="block mb-1">Preferred Side</label>
@@ -340,8 +244,7 @@ export default function DashboardPage() {
                 <option value="longShort">Long + Short</option>
               </select>
             </div>
-
-            {/* Long & Short Sizes */}
+            {/* Sizes */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block mb-1">Long Size (USDT)</label>
@@ -362,8 +265,7 @@ export default function DashboardPage() {
                 />
               </div>
             </div>
-
-            {/* TP/SL Toggle */}
+            {/* TP/SL */}
             <div className="flex items-center">
               <input
                 type="checkbox"
@@ -373,8 +275,7 @@ export default function DashboardPage() {
               />
               <label>Enable TP/SL</label>
             </div>
-
-            {/* Stop Loss, Take Profit, Leverage */}
+            {/* Stop/Take/Leverage */}
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block mb-1">Stop Loss (%)</label>
@@ -406,7 +307,6 @@ export default function DashboardPage() {
                 />
               </div>
             </div>
-
             <button
               type="submit"
               className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
@@ -414,7 +314,7 @@ export default function DashboardPage() {
               Save Configuration
             </button>
           </form>
-        </div>
+        </section>
       </main>
     </div>
   );
