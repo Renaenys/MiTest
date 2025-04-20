@@ -4,17 +4,27 @@ import bcrypt from 'bcryptjs';
 import { signToken } from '@/lib/auth';
 
 export async function POST(req) {
-  await dbConnect();
+	await dbConnect();
 
-  const { email, password } = await req.json();
-  const user = await User.findOne({ email });
+	const { email, password } = await req.json();
+	const user = await User.findOne({ email });
 
-  if (!user) return new Response(JSON.stringify({ message: 'User not found' }), { status: 404 });
-  if (!user.isVerified) return new Response(JSON.stringify({ message: 'Please verify your email first' }), { status: 403 });
+	if (!user)
+		return new Response(JSON.stringify({ message: 'User not found' }), {
+			status: 404,
+		});
+	if (!user.isVerified)
+		return new Response(
+			JSON.stringify({ message: 'Please verify your email first' }),
+			{ status: 403 }
+		);
 
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) return new Response(JSON.stringify({ message: 'Invalid credentials' }), { status: 401 });
+	const isMatch = await bcrypt.compare(password, user.password);
+	if (!isMatch)
+		return new Response(JSON.stringify({ message: 'Invalid credentials' }), {
+			status: 401,
+		});
 
-  const token = signToken(user);
-  return new Response(JSON.stringify({ token }), { status: 200 });
+	const token = signToken(user);
+	return new Response(JSON.stringify({ token }), { status: 200 });
 }
