@@ -9,9 +9,8 @@ function normalizeFuturesSymbol(sym) {
 }
 
 export async function POST(request) {
+	// 1) Connect & parse
 	await dbConnect();
-
-	// 1) Parse & validate
 	let payload;
 	try {
 		payload = await request.json();
@@ -21,7 +20,20 @@ export async function POST(request) {
 			headers: { 'Content-Type': 'application/json' },
 		});
 	}
-	const { action, symbol, side, orderType, secret, price } = payload;
+
+	// 2) Destructure correctly!
+	const {
+		secret,
+		exchange: exchangeNameRaw = 'binance',
+		action,
+		symbol,
+		side,
+		orderType, // ◀── use the correct field name
+		price,
+	} = payload;
+	const exchangeName = exchangeNameRaw.toLowerCase();
+
+	// 3) Auth & validate
 	if (secret !== process.env.WEBHOOK_SECRET) {
 		return new Response(JSON.stringify({ message: 'Invalid secret' }), {
 			status: 403,
@@ -35,11 +47,14 @@ export async function POST(request) {
 		});
 	}
 
-	// 2) Load all eligible bots
-	const bots = await BotSetting.find({
+	// 4) Load bots that actually have credentials for this exchange
+	const query = {
 		enabled: true,
 		credit: { $gte: 100 },
-	});
+		[`${exchangeName}.apiKey`]: { $exists: true, $ne: '' },
+		[`${exchangeName}.secret`]: { $exists: true, $ne: '' },
+	};
+	const bots = await BotSetting.find(query);
 	if (bots.length === 0) {
 		return new Response(JSON.stringify({ message: 'No eligible users' }), {
 			status: 404,
@@ -47,13 +62,13 @@ export async function POST(request) {
 		});
 	}
 
-	// 3) Process each bot in parallel
+	// 5) Process each bot
+	const futSym = normalizeFuturesSymbol(symbol);
 	const results = await Promise.all(
 		bots.map(async (bot) => {
-			const futSym = normalizeFuturesSymbol(symbol);
 			try {
 				if (action === 'open') {
-					// 3a) OPEN: pick USDT notional from user prefs
+					// OPEN
 					const usdt =
 						bot.preferredSide === 'long'
 							? bot.longSize
@@ -62,9 +77,9 @@ export async function POST(request) {
 							: (bot.longSize + bot.shortSize) / 2;
 
 					const params = {
-						exchange: 'binance',
+						exchange: exchangeName,
 						symbol: futSym,
-						type: orderType,
+						type: orderType, // ◀── now defined
 						side,
 						amount: usdt,
 						price: orderType === 'limit' ? price : undefined,
@@ -75,14 +90,14 @@ export async function POST(request) {
 							stopLoss: bot.stopLoss,
 						};
 					}
+
 					const { submitted, confirmed } = await executeOrder(bot, params);
 
-					// debit + record
 					bot.credit -= 10;
 					await bot.save();
 					await Order.create({
 						user: bot.user,
-						exchange: 'binance',
+						exchange: exchangeName,
 						orderId: submitted.id,
 						symbol: futSym,
 						side,
@@ -100,39 +115,46 @@ export async function POST(request) {
 						order: confirmed,
 					};
 				} else {
-					// 3b) CLOSE: mirror the same USDT notional
+					// CLOSE
 					const openDoc = await Order.findOne({
 						user: bot.user,
 						symbol: futSym,
 						status: 'open',
-					}).sort({ createdAt: -1 });
-					if (!openDoc) {
-						throw new Error(`No open order for ${futSym}`);
-					}
+					})
+						.sort({ createdAt: -1 })
+						.lean();
+					if (!openDoc) throw new Error(`No open order for ${futSym}`);
 
 					const closeSide = openDoc.side === 'buy' ? 'sell' : 'buy';
 					const notionalUSDT = openDoc.amount;
 
-					const { confirmed } = await executeOrder(bot, {
-						exchange: 'binance',
+					const params = {
+						exchange: exchangeName,
 						symbol: futSym,
 						type: 'market',
 						side: closeSide,
 						amount: notionalUSDT,
-					});
+					};
 
-					// debit + update
+					const { confirmed } = await executeOrder(bot, params);
+
 					bot.credit -= 10;
 					await bot.save();
 
 					const closedCost = confirmed.cost ?? notionalUSDT;
-					openDoc.amount = closedCost;
-					openDoc.price = confirmed.price ?? openDoc.price;
-					openDoc.status = 'closed';
-					openDoc.closedAt = new Date();
-					openDoc.profit = closedCost - notionalUSDT;
-					openDoc.rawClose = confirmed;
-					await openDoc.save();
+					await Order.updateOne(
+						{ _id: openDoc._id },
+						{
+							$set: {
+								amount: closedCost,
+								price: confirmed.price ?? openDoc.price,
+								status: 'closed',
+								closedAt: new Date(),
+								profit: closedCost - notionalUSDT,
+								rawClose: confirmed,
+							},
+						}
+					);
 
 					return {
 						user: bot.user.toString(),
@@ -142,12 +164,15 @@ export async function POST(request) {
 					};
 				}
 			} catch (err) {
-				return { user: bot.user.toString(), error: err.message };
+				return {
+					user: bot.user.toString(),
+					error: err.message,
+				};
 			}
 		})
 	);
 
-	// 4) Respond with all results
+	// 6) Respond
 	return new Response(JSON.stringify({ results }), {
 		status: 200,
 		headers: { 'Content-Type': 'application/json' },
