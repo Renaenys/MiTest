@@ -30,7 +30,7 @@ export default function LoginPage() {
 
 	useEffect(() => {
 		const token = safeLocalStorage.getItem('token');
-		if (token) router.push('/dashboard');
+		if (token) router.push('/pages/dashboard');
 	}, [router]);
 
 	const handleLogin = async (e) => {
@@ -41,7 +41,7 @@ export default function LoginPage() {
 			const res = await axios.post('/api/auth/login', form);
 			if (res.data?.token) {
 				safeLocalStorage.setItem('token', res.data.token);
-				router.push('/dashboard');
+				router.push('/pages/dashboard');
 			} else {
 				setStatus({ type: 'error', message: 'Invalid response from server.' });
 			}
@@ -107,12 +107,15 @@ export default function LoginPage() {
 
 					{/* Links row */}
 					<div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
-						<Link href="/forgot-password" className="hover:underline">
+						<Link href="/pages/forgot-password" className="hover:underline">
 							Forgot Password?
 						</Link>
 						<div>
 							Don’t have an account?{' '}
-							<Link href="/register" className="hover:underline text-blue-600">
+							<Link
+								href="/pages/register"
+								className="hover:underline text-blue-600"
+							>
 								Register
 							</Link>
 						</div>
