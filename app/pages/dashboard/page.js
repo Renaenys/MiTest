@@ -1,8 +1,8 @@
-// app/dashboard/page.jsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import axios from 'axios';
 import {
 	FiMenu,
@@ -21,26 +21,15 @@ export default function DashboardPage() {
 	const [collapsed, setCollapsed] = useState(false);
 	const [controlStatus, setControlStatus] = useState('');
 
-	// Signal config state...
-	const [activation, setActivation] = useState('active');
-	const [webhookType, setWebhookType] = useState('public');
-	const [preferredSide, setPreferredSide] = useState('longShort');
-	const [longSize, setLongSize] = useState('6');
-	const [shortSize, setShortSize] = useState('6');
-	const [tpSlEnabled, setTpSlEnabled] = useState(false);
-	const [stopLoss, setStopLoss] = useState('0');
-	const [takeProfit, setTakeProfit] = useState('0.5');
-	const [leverage, setLeverage] = useState('1');
-
 	// 1) Auth & user
 	useEffect(() => {
 		setIsClient(true);
 		const token = localStorage.getItem('token');
-		if (!token) return router.push('/pages/login');
+		if (!token) return router.push('/login');
 		try {
 			setUser(JSON.parse(atob(token.split('.')[1])));
 		} catch {
-			router.push('/pages/login');
+			router.push('/login');
 		}
 	}, [router]);
 
@@ -49,24 +38,12 @@ export default function DashboardPage() {
 		if (!isClient || !user) return;
 		const token = localStorage.getItem('token');
 
-		// a) Bot settings
+		// a) Bot settings (to show credit, etc)
 		axios
 			.get('/api/bot-settings', {
 				headers: { Authorization: `Bearer ${token}` },
 			})
-			.then((res) => {
-				const d = res.data;
-				setBotSettings(d);
-				setActivation(d.activation ?? 'active');
-				setWebhookType(d.webhookType ?? 'public');
-				setPreferredSide(d.preferredSide ?? 'longShort');
-				setLongSize(d.longSize?.toString() ?? '6');
-				setShortSize(d.shortSize?.toString() ?? '6');
-				setStopLoss(d.stopLoss?.toString() ?? '0');
-				setTakeProfit(d.takeProfit?.toString() ?? '0.5');
-				setLeverage(d.leverage?.toString() ?? '1');
-				setTpSlEnabled(d.tpSlEnabled ?? false);
-			})
+			.then((res) => setBotSettings(res.data))
 			.catch(console.error);
 
 		// b) Live positions
@@ -78,80 +55,71 @@ export default function DashboardPage() {
 			.catch((err) => console.error('Error fetching positions:', err));
 	}, [isClient, user]);
 
-	// Handlers...
-	const handleLogout = () => {
-		localStorage.removeItem('token');
-		router.push('/pages/login');
-	};
-	const handleControlSubmit = async (e) => {
-		e.preventDefault();
-		if (!botSettings) return;
-		const token = localStorage.getItem('token');
-		const payload = {
-			...botSettings,
-			activation,
-			webhookType,
-			preferredSide,
-			longSize: +longSize,
-			shortSize: +shortSize,
-			stopLoss: +stopLoss,
-			takeProfit: +takeProfit,
-			leverage: +leverage,
-			tpSlEnabled,
-		};
-		try {
-			await axios.post('/api/bot-settings', payload, {
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			setControlStatus('Configuration saved!');
-		} catch {
-			setControlStatus('Error saving configuration.');
-		}
-	};
-
 	if (!isClient || !user) {
 		return <p className="text-center mt-10 text-gray-300">Loading…</p>;
 	}
 
+	const handleLogout = () => {
+		localStorage.removeItem('token');
+		router.push('/login');
+	};
+
 	return (
-		<div className="flex min-h-screen">
+		<div className="relative min-h-screen bg-gray-900 text-gray-100">
+			{/* Mobile “open” button */}
+			{collapsed && (
+				<button
+					onClick={() => setCollapsed(false)}
+					className="fixed top-4 left-4 z-40 text-white md:hidden"
+				>
+					<FiMenu size={28} />
+				</button>
+			)}
+
 			{/* Sidebar */}
 			<aside
-				className={`bg-gray-900 text-white p-4 ${
-					collapsed ? 'w-16' : 'w-64'
-				} transition-all`}
+				className={`
+          fixed inset-y-0 left-0 z-30 bg-gray-900 p-4 overflow-y-auto
+          transform transition-transform duration-200 w-64
+          ${collapsed ? '-translate-x-full' : 'translate-x-0'}
+          md:static md:translate-x-0
+          ${collapsed ? 'md:w-16' : 'md:w-64'}
+        `}
 			>
-				<div className="flex items-center justify-between mb-4">
-					{!collapsed && <h1 className="text-lg font-bold">Xtrade</h1>}
-					<button onClick={() => setCollapsed(!collapsed)}>
+				<div className="flex items-center justify-between mb-6">
+					{!collapsed && <span className="text-xl font-bold">Xtrade</span>}
+					<button
+						onClick={() => setCollapsed(!collapsed)}
+						className="text-gray-300 hover:text-white"
+					>
 						<FiMenu size={20} />
 					</button>
 				</div>
 				<nav className="space-y-4">
 					<button
 						onClick={() => router.push('/pages/profile')}
-						className="flex items-center gap-2 hover:text-blue-400"
+						className="flex items-center gap-2 hover:text-blue-400 w-full"
 					>
 						<FiUser />
 						{!collapsed && 'Profile'}
 					</button>
 					<button
 						onClick={() => router.push('/pages/bot-settings')}
-						className="flex items-center gap-2 hover:text-blue-400"
+						className="flex items-center gap-2 hover:text-blue-400 w-full"
 					>
 						<FiSettings />
 						{!collapsed && 'Settings'}
 					</button>
 					<button
 						onClick={() => router.push('/pages/logs')}
-						className="flex items-center gap-2 hover:text-yellow-400"
+						className="flex items-center gap-2 hover:text-yellow-400 w-full"
 					>
 						<FiClipboard />
 						{!collapsed && 'Logs'}
 					</button>
 					<button
 						onClick={handleLogout}
-						className="flex items-center gap-2 hover:text-red-400"
+						className="flex items-center gap-2 hover:text-red-400 w-full"
 					>
 						<FiLogOut />
 						{!collapsed && 'Logout'}
@@ -159,28 +127,33 @@ export default function DashboardPage() {
 				</nav>
 			</aside>
 
-			{/* Main */}
-			<main className="flex-1 bg-gray-800 p-6 text-gray-100 overflow-y-auto">
+			{/* Main content */}
+			<main
+				className={`
+          bg-gray-800 p-6 overflow-y-auto transition-all duration-200
+          ${collapsed ? 'md:ml-16' : 'md:ml-64'}
+        `}
+			>
 				{/* Header */}
-				<div className="flex justify-between items-center mb-6">
+				<div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 space-y-4 md:space-y-0">
 					<div>
 						<h2 className="text-2xl font-semibold">
 							{user.firstName} {user.lastName}
 						</h2>
 						<p className="text-gray-400">{user.email}</p>
 					</div>
-					<div>
+					<div className="text-lg">
 						Points: <strong>{botSettings?.credit ?? 0}</strong>
 					</div>
 				</div>
 
 				{/* Open Positions */}
-				<section className="bg-gray-700 p-4 rounded mb-6">
+				<section className="bg-gray-700 p-4 rounded-lg mb-6">
 					<h3 className="text-xl mb-2">Your Open Positions</h3>
 					{positions.length === 0 ? (
 						<p className="text-gray-400">No open positions.</p>
 					) : (
-						<div className="grid grid-cols-4 gap-2 text-sm">
+						<div className="grid grid-cols-4 gap-4 text-sm">
 							<div className="font-bold">Symbol</div>
 							<div className="font-bold">Side</div>
 							<div className="font-bold">Contracts</div>
@@ -195,125 +168,6 @@ export default function DashboardPage() {
 							))}
 						</div>
 					)}
-				</section>
-
-				{/* Signal Configuration Form (unchanged) */}
-				<section className="bg-gray-700 p-4 rounded">
-					<h3 className="text-xl mb-4">Signal Configuration</h3>
-					{controlStatus && (
-						<p className="mb-4 text-green-400">{controlStatus}</p>
-					)}
-					<form
-						onSubmit={handleControlSubmit}
-						className="space-y-4 text-gray-200"
-					>
-						{/* Activation */}
-						<div>
-							<label className="block mb-1">Signal Activation</label>
-							<select
-								value={activation}
-								onChange={(e) => setActivation(e.target.value)}
-								className="w-full p-2 bg-gray-600 rounded"
-							>
-								<option value="active">Active</option>
-								<option value="inactive">Inactive</option>
-							</select>
-						</div>
-						{/* Webhook Mode */}
-						<div>
-							<label className="block mb-1">Webhook Mode</label>
-							<select
-								value={webhookType}
-								onChange={(e) => setWebhookType(e.target.value)}
-								className="w-full p-2 bg-gray-600 rounded"
-							>
-								<option value="public">Public</option>
-								<option value="individual">Individual</option>
-							</select>
-						</div>
-						{/* Preferred Side */}
-						<div>
-							<label className="block mb-1">Preferred Side</label>
-							<select
-								value={preferredSide}
-								onChange={(e) => setPreferredSide(e.target.value)}
-								className="w-full p-2 bg-gray-600 rounded"
-							>
-								<option value="long">Long</option>
-								<option value="short">Short</option>
-								<option value="longShort">Long + Short</option>
-							</select>
-						</div>
-						{/* Sizes */}
-						<div className="grid grid-cols-2 gap-4">
-							<div>
-								<label className="block mb-1">Long Size (USDT)</label>
-								<input
-									type="number"
-									value={longSize}
-									onChange={(e) => setLongSize(e.target.value)}
-									className="w-full p-2 bg-gray-600 rounded"
-								/>
-							</div>
-							<div>
-								<label className="block mb-1">Short Size (USDT)</label>
-								<input
-									type="number"
-									value={shortSize}
-									onChange={(e) => setShortSize(e.target.value)}
-									className="w-full p-2 bg-gray-600 rounded"
-								/>
-							</div>
-						</div>
-						{/* TP/SL */}
-						<div className="flex items-center">
-							<input
-								type="checkbox"
-								checked={tpSlEnabled}
-								onChange={(e) => setTpSlEnabled(e.target.checked)}
-								className="mr-2"
-							/>
-							<label>Enable TP/SL</label>
-						</div>
-						{/* Stop/Take/Leverage */}
-						<div className="grid grid-cols-3 gap-4">
-							<div>
-								<label className="block mb-1">Stop Loss (%)</label>
-								<input
-									type="number"
-									step="0.1"
-									value={stopLoss}
-									onChange={(e) => setStopLoss(e.target.value)}
-									className="w-full p-2 bg-gray-600 rounded"
-								/>
-							</div>
-							<div>
-								<label className="block mb-1">Take Profit (%)</label>
-								<input
-									type="number"
-									step="0.1"
-									value={takeProfit}
-									onChange={(e) => setTakeProfit(e.target.value)}
-									className="w-full p-2 bg-gray-600 rounded"
-								/>
-							</div>
-							<div>
-								<label className="block mb-1">Leverage</label>
-								<input
-									type="number"
-									value={leverage}
-									onChange={(e) => setLeverage(e.target.value)}
-									className="w-full p-2 bg-gray-600 rounded"
-								/>
-							</div>
-						</div>
-						<button
-							type="submit"
-							className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded"
-						>
-							Save Configuration
-						</button>
-					</form>
 				</section>
 			</main>
 		</div>
