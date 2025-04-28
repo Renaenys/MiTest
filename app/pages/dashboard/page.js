@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import axios from 'axios';
 import {
 	FiMenu,
@@ -14,31 +13,30 @@ import {
 
 export default function DashboardPage() {
 	const router = useRouter();
-	const [isClient, setIsClient] = useState(false);
 	const [user, setUser] = useState(null);
 	const [botSettings, setBotSettings] = useState(null);
 	const [positions, setPositions] = useState([]);
 	const [collapsed, setCollapsed] = useState(false);
-	const [controlStatus, setControlStatus] = useState('');
+	const [status, setStatus] = useState(null);
 
-	// 1) Auth & user
+	// Auth & user
 	useEffect(() => {
-		setIsClient(true);
 		const token = localStorage.getItem('token');
 		if (!token) return router.push('/login');
 		try {
-			setUser(JSON.parse(atob(token.split('.')[1])));
+			const decodedUser = JSON.parse(atob(token.split('.')[1]));
+			setUser(decodedUser);
 		} catch {
 			router.push('/login');
 		}
 	}, [router]);
 
-	// 2) Fetch settings & positions once
+	// Fetch botSettings & positions once user is loaded
 	useEffect(() => {
-		if (!isClient || !user) return;
+		if (!user) return;
+
 		const token = localStorage.getItem('token');
 
-		// a) Bot settings (to show credit, etc)
 		axios
 			.get('/api/bot-settings', {
 				headers: { Authorization: `Bearer ${token}` },
@@ -46,23 +44,42 @@ export default function DashboardPage() {
 			.then((res) => setBotSettings(res.data))
 			.catch(console.error);
 
-		// b) Live positions
 		axios
 			.get('/api/positions/live', {
 				headers: { Authorization: `Bearer ${token}` },
 			})
 			.then((res) => setPositions(res.data))
 			.catch((err) => console.error('Error fetching positions:', err));
-	}, [isClient, user]);
+	}, [user]);
 
-	if (!isClient || !user) {
-		return <p className="text-center mt-10 text-gray-300">Loading…</p>;
-	}
+	// Fetch DCA status periodically
+	useEffect(() => {
+		if (!user) return;
+
+		const fetchStatus = async () => {
+			try {
+				const res = await axios.get('/api/user-dca-status', {
+					headers: { 'user-id': user.id },
+				});
+				setStatus(res.data);
+			} catch (err) {
+				console.error('Error fetching DCA status:', err);
+			}
+		};
+
+		fetchStatus();
+		const interval = setInterval(fetchStatus, 120000); // every 1m
+		return () => clearInterval(interval);
+	}, [user]);
 
 	const handleLogout = () => {
 		localStorage.removeItem('token');
 		router.push('/login');
 	};
+
+	if (!user || !botSettings) {
+		return <p className="text-center mt-10 text-gray-300">Loading…</p>;
+	}
 
 	return (
 		<div className="relative min-h-screen bg-gray-900 text-gray-100">
@@ -146,6 +163,24 @@ export default function DashboardPage() {
 						Points: <strong>{botSettings?.credit ?? 0}</strong>
 					</div>
 				</div>
+
+				{/* DCA Status */}
+				{status && (
+					<section className="bg-gray-700 p-4 rounded-lg mb-6">
+						<h3 className="text-xl mb-2">DCA Bot Status for {status.pair}</h3>
+						<p>Current Price: {status.currentPrice}</p>
+						<p>Average Price: {status.averagePrice}</p>
+						<p>TP Price: {status.tpPrice}</p>
+						<p>Next Layer Price: {status.nextLayerPrice}</p>
+						<p>Current Layer: {status.currentLayer}</p>
+						<p>USDT Balance: {status.usdtBalance}</p>
+						<p>
+							{status.currentPrice >= status.tpPrice
+								? '🟢 Ready to TP!'
+								: '🔵 Waiting...'}
+						</p>
+					</section>
+				)}
 
 				{/* Open Positions */}
 				<section className="bg-gray-700 p-4 rounded-lg mb-6">
